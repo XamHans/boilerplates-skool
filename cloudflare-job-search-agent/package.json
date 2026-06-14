@@ -1,0 +1,22 @@
+{
+  "name": "cloudflare-job-search-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "dev:remote": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build-portals": "node scripts/build-portals.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "agents": "latest"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "js-yaml": "^4.1.0",
+    "typescript": "latest",
+    "wrangler": "latest"
+  }
+}
