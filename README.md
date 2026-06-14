@@ -1,8 +1,16 @@
 # Boilerplates Skool
 
-A monorepo collecting starter templates and boilerplates for the Skool community.
+A monorepo collecting starter templates and boilerplates for **The AI Engineer** — Johannes Hayer's Skool community.
 
-## Projects
+Join the community: [skool.com/ai-builders-6997/about](https://www.skool.com/ai-builders-6997/about)
+
+## Community Knowledge Base
+
+Alongside this code repo, the community has a public Obsidian knowledge graph with concepts, tools, and learning resources:
+
+**[github.com/XamHans/obisidian-knowledge-graph](https://github.com/XamHans/obisidian-knowledge-graph)**
+
+## Boilerplates
 
 | Folder | Description |
 |--------|-------------|
