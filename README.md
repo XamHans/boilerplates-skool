@@ -4,6 +4,8 @@ A monorepo collecting starter templates and boilerplates for **The AI Engineer**
 
 Join the community: [skool.com/ai-builders-6997/about](https://www.skool.com/ai-builders-6997/about)
 
+Want more? Join the free Slack for questions, updates and discussions: [Join Slack](https://join.slack.com/t/j-hayer/shared_invite/zt-40wmmgk82-~j8H6fVycgya21bgsNsyOQ)
+
 ## Community Knowledge Base
 
 Alongside this code repo, the community has a public Obsidian knowledge graph with concepts, tools, and learning resources:
