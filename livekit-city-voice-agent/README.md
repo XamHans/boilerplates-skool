@@ -1,10 +1,12 @@
-# Lüneburg Voice AI Agent
+# LiveKit City Voice Agent
 
-A German-language voice AI assistant with knowledge base retrieval, built with LiveKit Agents.
+> **Note:** This is an imaginary use case built as a boilerplate. The "Hansestadt Lüneburg" city administration scenario is fictional and used purely as a realistic example to demonstrate how to build a voice AI agent for municipal/government services. Swap in your own city, brand, and knowledge base to make it your own.
+
+A voice AI assistant with RAG-powered knowledge base retrieval, built with LiveKit Agents. Demonstrates a complete production setup: STT → LLM → Tools → TTS pipeline with Docker Compose.
 
 ## Overview
 
-This is a **German-language auto-turn voicebot** for the Hansestadt Lüneburg city administration. Citizens can speak naturally to get information about city services, opening hours, and administrative procedures.
+This is an **auto-turn voicebot** for an imaginary city administration. Citizens can speak naturally to get information about city services, opening hours, and administrative procedures.
 
 **Key Features:**
 - Continuous voice interaction (no push-to-talk required)
