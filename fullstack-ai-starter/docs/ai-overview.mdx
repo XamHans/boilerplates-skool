@@ -1,0 +1,265 @@
+---
+title: 'AI SDK Overview'
+description: 'Build AI-powered applications with Vercel AI SDK integration, streaming responses, and multiple provider support'
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/ai-playground-light.svg"
+  alt="AI Playground Interface"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/ai-playground-dark.svg"
+  alt="AI Playground Interface"
+/>
+
+# AI SDK Overview
+
+## What
+
+The Vercel AI SDK integration provides a complete foundation for building AI-powered features including text generation, chat interfaces, and streaming responses. Pre-configured with multiple AI providers and production-ready patterns.
+
+## Why
+
+- **Multi-Provider Support**: OpenAI, Anthropic, Google AI, and more
+- **Type Safety**: Full TypeScript integration with compile-time validation
+- **Real-time Streaming**: Instant user feedback with streaming responses
+- **Production Ready**: Built-in error handling, rate limiting, and observability
+
+## Getting Started
+
+### 1. Get API Keys
+
+Choose your preferred AI provider and get API keys:
+
+**OpenAI** (Recommended for getting started)
+
+1. Visit [OpenAI Platform](https://platform.openai.com/)
+2. Create account and add billing information
+3. Generate API key in the API Keys section
+
+**Anthropic Claude**
+
+1. Visit [Anthropic Console](https://console.anthropic.com/)
+2. Create account and generate API key
+
+**Google AI**
+
+1. Visit [Google AI Studio](https://makersuite.google.com/)
+2. Create project and generate API key
+
+### 2. Environment Setup
+
+Add your API keys to `.env.local`:
+
+```env
+# AI Providers (add one or more)
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_AI_API_KEY=...
+
+# Optional: Observability
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+```
+
+### 3. Create Your First AI Feature
+
+**API Route Implementation**
+
+```typescript
+// app/api/ai/generate-text/route.ts
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/handlers';
+import { parseRequestBody } from '@/lib/validation/parse';
+
+const generateTextSchema = z.object({
+  prompt: z.string().min(1, 'Prompt is required'),
+});
+
+export const POST = withAuth(async (session, request) => {
+  const bodyResult = await parseRequestBody(request, generateTextSchema);
+  if (!bodyResult.success) return bodyResult;
+
+  const { text } = await generateText({
+    model: openai('gpt-3.5-turbo'),
+    prompt: bodyResult.data.prompt,
+  });
+
+  return { success: true, data: { text } };
+});
+```
+
+**Frontend Component**
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+
+export function AITextGenerator() {
+  const [prompt, setPrompt] = useState('');
+  const [result, setResult] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/ai/generate-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setResult(data.data.text);
+      } else {
+        console.error('Error:', data.error);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder="Enter your prompt..."
+        rows={3}
+      />
+      <Button onClick={handleGenerate} disabled={loading || !prompt}>
+        {loading ? 'Generating...' : 'Generate'}
+      </Button>
+      {result && (
+        <div className="p-4 bg-gray-50 rounded-lg">
+          <p>{result}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## Example
+
+Complete streaming chat implementation:
+
+```tsx
+'use client';
+
+import { useChat } from 'ai/react';
+
+export function ChatInterface() {
+  const { messages, input, handleInputChange, handleSubmit, isLoading } =
+    useChat({
+      api: '/api/ai/chat',
+    });
+
+  return (
+    <div className="flex flex-col h-[600px]">
+      <div className="flex-1 overflow-y-auto space-y-4">
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={`p-3 rounded-lg ${
+              message.role === 'user'
+                ? 'bg-blue-500 text-white ml-auto max-w-xs'
+                : 'bg-gray-100 mr-auto max-w-xs'
+            }`}
+          >
+            {message.content}
+          </div>
+        ))}
+      </div>
+
+      <form onSubmit={handleSubmit} className="flex gap-2 p-4">
+        <input
+          value={input}
+          onChange={handleInputChange}
+          placeholder="Type your message..."
+          disabled={isLoading}
+          className="flex-1 p-2 border rounded"
+        />
+        <button type="submit" disabled={isLoading}>
+          Send
+        </button>
+      </form>
+    </div>
+  );
+}
+```
+
+## Key Features
+
+### Text Generation
+
+- Single prompts with any AI model
+- Custom parameters and settings
+- Error handling and validation
+
+### Chat Interfaces
+
+- Multi-turn conversations
+- Message history management
+- Real-time streaming responses
+
+### Streaming Support
+
+- Token-by-token streaming
+- Progressive response rendering
+- Optimized user experience
+
+### Multiple Providers
+
+- **OpenAI**: GPT-4, GPT-3.5-turbo
+- **Anthropic**: Claude 3.5 Sonnet
+- **Google AI**: Gemini Pro
+- **Easy switching**: Change providers with one line
+
+## AI Capabilities
+
+Explore the full range of AI features available:
+
+<CardGroup cols={2}>
+  <Card title="Text Generation" icon="magic" href="/text-generation">
+    Build AI-powered content generation with streaming responses and multiple
+    models.
+  </Card>
+  <Card title="Chat Interfaces" icon="messages" href="/ai-chat">
+    Create conversational AI experiences with persistent message history.
+  </Card>
+  <Card title="Best Practices" icon="star" href="/ai-best-practices">
+    Optimize performance, costs, and user experience with proven patterns.
+  </Card>
+  <Card title="File Uploads" icon="upload" href="/file-uploads">
+    Handle file uploads securely with AI processing capabilities.
+  </Card>
+</CardGroup>
+
+## Interactive Playground
+
+Test AI features interactively:
+
+- **Text Generation**: `/playground/generate-text/generate-text`
+- **Chat Interface**: `/playground/generate-text/chat`
+- **File Uploads**: `/playground/generate-text/file-upload`
+
+## Next Steps
+
+Ready to build AI features? Start with:
+
+1. **Choose your first feature**: Text generation or chat interface
+2. **Set up API keys**: Follow the environment setup guide above
+3. **Deploy and test**: Use the interactive playground to validate
+4. **Monitor usage**: Set up observability for production insights

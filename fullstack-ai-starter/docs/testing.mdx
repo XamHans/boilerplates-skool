@@ -1,0 +1,539 @@
+---
+title: 'Testing Architecture'
+description: 'BDD-focused testing with dependency injection, real database integration, and test schema isolation'
+---
+
+# Testing Architecture
+
+## What
+
+A test-first architecture built for Behavior-Driven Development (BDD), featuring dependency injection containers, integration tests against real PostgreSQL databases, and complete schema isolation using dedicated test schemas.
+
+## Why
+
+- **BDD Workflow**: Test-first development enables the full BDD workflow from spec to implementation
+- **Easy Testing**: Dependency injection container makes swapping dependencies trivial
+- **Real Integration Tests**: Tests run against actual PostgreSQL, catching real database issues
+- **No Brittle Mocks**: Services use DI instead of import mocking for internal dependencies
+- **Complete Isolation**: Separate test schema prevents any conflict with production data
+- **Fast & Reliable**: Schema persists between runs; only data is cleaned for speed
+
+## How
+
+### Dependency Injection Container
+
+The container pattern is the foundation that makes testing easy and reliable.
+
+**Key Principle**: Services receive dependencies through constructor injection, not direct imports.
+
+```typescript
+// ❌ WRONG: Direct import creates tight coupling
+import { db } from '@/lib/db';
+
+export class PostService {
+  async getPosts() {
+    return await db.select().from(posts);
+  }
+}
+
+// ✅ CORRECT: Dependencies injected via constructor
+export class PostService {
+  constructor(private deps: ServiceDependencies) {}
+
+  async getPosts() {
+    return await this.deps.db.select().from(posts);
+  }
+}
+```
+
+**Benefits for Testing**:
+
+1. **Easy Dependency Swapping**: Inject test database instead of production database
+2. **No Import Mocking**: Avoid fragile `vi.mock()` calls for services
+3. **Consistent Behavior**: Same service code runs in tests and production
+4. **Clear Dependencies**: Explicit dependency graph in container
+5. **Flexible Mocking**: Mock external APIs (Gemini, R2) while keeping real database
+
+### Test Database Setup
+
+Tests use the same PostgreSQL database as production, but with a separate `test` schema for complete isolation.
+
+**Architecture**:
+- **Production**: Uses `public` schema with Neon serverless driver
+- **Tests**: Uses `test` schema with postgres.js driver
+- **Isolation**: PostgreSQL `search_path` ensures complete separation
+- **Migrations**: All migrations applied to test schema at startup
+- **Cleanup**: Tables truncated before each test (schema structure persists)
+
+### Setup and Configuration
+
+1. **Environment Variables**
+
+```env
+# Same DATABASE_URL for both production and tests
+DATABASE_URL=postgres://username:password@ep-instance-id.region.aws.neon.tech/neondb
+```
+
+2. **Test Setup** (tests/setup.ts)
+
+```typescript
+import { setupServer } from 'msw/node';
+import { afterAll, beforeAll, beforeEach } from 'vitest';
+import { setupTestDatabase, teardownTestDatabase, cleanTestDatabase } from './utils/test-database';
+
+// Setup MSW server for API mocking
+export const server = setupServer(...handlers);
+
+// Global setup for all tests
+beforeAll(async () => {
+  server.listen({ onUnhandledRequest: 'bypass' });
+
+  // Create test schema and apply all migrations
+  await setupTestDatabase();
+});
+
+afterAll(async () => {
+  server.close();
+
+  // Close database connections (schema persists for speed)
+  await teardownTestDatabase();
+});
+
+beforeEach(async () => {
+  server.resetHandlers();
+
+  // Clean all tables in test schema
+  await cleanTestDatabase();
+});
+```
+
+3. **Test Database Utilities** (tests/utils/test-database.ts)
+
+```typescript
+export async function setupTestDatabase() {
+  const testClient = postgres(process.env.DATABASE_URL!);
+  testDb = drizzle(testClient, { schema });
+
+  // Create test schema
+  await testClient`CREATE SCHEMA IF NOT EXISTS test`;
+
+  // Set search path to test schema
+  await testClient`SET search_path TO test`;
+
+  // Read and execute migrations in test schema
+  const migrationSQL = readFileSync('./lib/db/migrations/0000_stormy_dark_beast.sql', 'utf-8');
+  const statements = migrationSQL.split('--> statement-breakpoint');
+
+  for (const statement of statements) {
+    await testClient.unsafe(statement);
+  }
+
+  // Reset search path
+  await testClient`SET search_path TO public`;
+}
+
+export async function cleanTestDatabase() {
+  // Set search path to test schema
+  await testClient`SET search_path TO test`;
+
+  // Truncate all tables with CASCADE to handle foreign keys
+  await testClient`TRUNCATE TABLE specs, posts, "user", "session", "account", verification CASCADE`;
+
+  // Reset search path
+  await testClient`SET search_path TO public`;
+}
+```
+
+4. **Test Container** (tests/utils/test-container.ts)
+
+The test container injects the test database into all services:
+
+```typescript
+export function createTestContainer(): Container {
+  // Get test database connected to test schema
+  const testDb = getTestDb();
+
+  const testDatabase: DatabaseConnection = {
+    db: testDb,
+  };
+
+  // Create service dependencies with test database
+  const serviceDependencies: ServiceDependencies = {
+    db: testDb,
+    logger: testLogger,
+    services: undefined,
+  };
+
+  // Create services with test dependencies
+  const userService = new UserService(serviceDependencies);
+  const postService = new PostService(serviceDependencies);
+
+  return {
+    database: testDatabase,
+    externalServices: {
+      // Mock external APIs
+      geminiClient: vi.fn().mockResolvedValue({ ... }),
+      r2Client: vi.fn().mockResolvedValue({ ... }),
+    },
+    userService,
+    postService,
+  };
+}
+```
+
+## Example
+
+### Complete Integration Test
+
+```typescript
+// modules/posts/tests/post.service.test.ts
+import { beforeEach, describe, expect, it } from 'vitest';
+import { createTestContainer } from '@/tests/utils/test-container';
+import type { PostService } from '../services/post.service';
+
+describe('PostService', () => {
+  let postService: PostService;
+  let testContainer: ReturnType<typeof createTestContainer>;
+
+  beforeEach(() => {
+    // Get fresh container with test database for each test
+    testContainer = createTestContainer();
+    postService = testContainer.postService;
+  });
+
+  describe('createPost', () => {
+    it('should create a new post in test database', async () => {
+      const postData = {
+        title: 'Test Post',
+        content: 'This is a test post content',
+        published: false,
+      };
+      const authorId = 'test-author-id';
+
+      // Service uses test database from container
+      const post = await postService.createPost(postData, authorId);
+
+      expect(post).toMatchObject({
+        title: postData.title,
+        content: postData.content,
+        published: postData.published,
+        authorId: authorId,
+      });
+      expect(post.id).toBeDefined();
+      expect(post.createdAt).toBeDefined();
+    });
+  });
+
+  describe('getPosts', () => {
+    beforeEach(async () => {
+      // Create test data in test schema
+      await postService.createPost({
+        title: 'Published Post 1',
+        content: 'Content 1',
+        published: true,
+      }, 'test-author');
+
+      await postService.createPost({
+        title: 'Draft Post',
+        content: 'Draft content',
+        published: false,
+      }, 'test-author');
+    });
+
+    it('should return only published posts', async () => {
+      const posts = await postService.getPosts();
+
+      expect(posts).toHaveLength(1);
+      expect(posts[0].published).toBe(true);
+    });
+
+    it('should filter by search term', async () => {
+      const posts = await postService.getPosts({ search: 'Post 1' });
+
+      expect(posts).toHaveLength(1);
+      expect(posts[0].title).toBe('Published Post 1');
+    });
+  });
+});
+```
+
+### Service with Dependency Injection
+
+```typescript
+// modules/posts/services/post.service.ts
+import { eq, desc, like, and } from 'drizzle-orm';
+import { posts } from '../schema';
+import type { ServiceDependencies } from '@/lib/container/types';
+
+export class PostService {
+  constructor(private deps: ServiceDependencies) {}
+
+  async createPost(data: { title: string; content: string; published: boolean }, authorId: string) {
+    // Uses injected database (test or production)
+    const [post] = await this.deps.db
+      .insert(posts)
+      .values({ ...data, authorId })
+      .returning();
+
+    this.deps.logger.info('Post created', { postId: post.id });
+    return post;
+  }
+
+  async getPosts(options?: { limit?: number; search?: string }) {
+    let query = this.deps.db
+      .select()
+      .from(posts)
+      .where(eq(posts.published, true));
+
+    if (options?.search) {
+      query = query.where(like(posts.title, `%${options.search}%`));
+    }
+
+    if (options?.limit) {
+      query = query.limit(options.limit);
+    }
+
+    return query.orderBy(desc(posts.createdAt));
+  }
+}
+```
+
+### Container Usage Comparison
+
+**Production** (app/api/posts/route.ts):
+```typescript
+import { getContainer } from '@/lib/container';
+
+export const GET = async () => {
+  // Gets production container with Neon serverless database
+  const container = getContainer();
+  const posts = await container.postService.getPosts();
+  return Response.json({ posts });
+};
+```
+
+**Tests** (modules/posts/tests/post.service.test.ts):
+```typescript
+import { createTestContainer } from '@/tests/utils/test-container';
+
+it('should get posts', async () => {
+  // Gets test container with postgres.js database in test schema
+  const testContainer = createTestContainer();
+  const posts = await testContainer.postService.getPosts();
+  expect(posts).toHaveLength(0);
+});
+```
+
+**Key Point**: The `PostService` code is identical in both cases. Only the container changes.
+
+## Test Lifecycle
+
+### 1. Global Setup (beforeAll)
+
+```typescript
+beforeAll(async () => {
+  // Start MSW server for HTTP mocking
+  server.listen();
+
+  // Setup test database
+  await setupTestDatabase();
+  // → Creates test schema
+  // → Applies all migrations to test schema
+  // → Returns connected database client
+});
+```
+
+### 2. Test Isolation (beforeEach)
+
+```typescript
+beforeEach(async () => {
+  // Reset API mocks
+  server.resetHandlers();
+
+  // Clean test database
+  await cleanTestDatabase();
+  // → Truncates all tables in test schema
+  // → Schema structure remains (for speed)
+  // → Each test gets clean slate
+});
+```
+
+### 3. Test Execution
+
+```typescript
+it('should create post', async () => {
+  // Get test container
+  const container = createTestContainer();
+
+  // Use services with test database
+  const post = await container.postService.createPost(data, authorId);
+
+  // Assertions against real database
+  expect(post.id).toBeDefined();
+});
+```
+
+### 4. Global Teardown (afterAll)
+
+```typescript
+afterAll(async () => {
+  // Stop MSW server
+  server.close();
+
+  // Close database connections
+  await teardownTestDatabase();
+  // → Closes postgres.js connection
+  // → Test schema persists (for faster subsequent runs)
+  // → Could optionally DROP SCHEMA test CASCADE
+});
+```
+
+## Key Features
+
+### Dependency Injection Benefits
+
+- **Test Database Injection**: Services use test database without code changes
+- **Service Composition**: Services can depend on other services through container
+- **External Service Mocking**: Mock APIs (Gemini, R2) while keeping real database
+- **No Import Mocking**: Avoid brittle `vi.mock()` for internal modules
+- **Production Parity**: Same service code in tests and production
+
+### Test Schema Isolation
+
+- **Complete Separation**: Test schema prevents any production data access
+- **PostgreSQL Features**: Full database features (foreign keys, constraints, triggers)
+- **Migration Parity**: Same migrations run in test schema as production
+- **Fast Cleanup**: TRUNCATE tables faster than DROP/CREATE
+- **Schema Persistence**: Structure persists; only data cleared between runs
+
+### BDD Workflow Integration
+
+- **Test-First**: Write tests before implementation (Red-Green-Refactor)
+- **Scenario-Driven**: Each Gherkin scenario becomes integration test
+- **Real Behavior**: Tests verify actual database operations
+- **Contract Tests**: API layer tests ensure contracts are met
+
+### Integration Test Patterns
+
+- **Repository Pattern**: Services act as repositories for database operations
+- **Real Database**: No mocked database calls; tests use actual PostgreSQL
+- **Service Layer Testing**: Test business logic with real persistence
+- **API Contract Testing**: Use Supertest for route handler integration tests
+
+## Testing Best Practices
+
+### 1. Co-locate Tests with Code
+
+```
+modules/
+└── posts/
+    ├── services/
+    │   └── post.service.ts
+    ├── schema.ts
+    └── tests/
+        └── post.service.test.ts
+```
+
+### 2. Use Test Container Pattern
+
+```typescript
+beforeEach(() => {
+  // Always create fresh test container
+  testContainer = createTestContainer();
+  postService = testContainer.postService;
+});
+```
+
+### 3. Test Against Real Database
+
+```typescript
+// ✅ GOOD: Real database integration
+it('should create post', async () => {
+  const post = await postService.createPost(data, authorId);
+  const found = await postService.getPostById(post.id);
+  expect(found).toMatchObject(post);
+});
+
+// ❌ BAD: Mocked database
+it('should create post', async () => {
+  vi.mocked(db.insert).mockResolvedValue([mockPost]);
+  const post = await postService.createPost(data, authorId);
+  expect(post).toEqual(mockPost);
+});
+```
+
+### 4. Follow Testing Pyramid
+
+- **Many Unit Tests**: Fast, isolated tests for utilities and helpers
+- **Some Integration Tests**: Service layer tests with real database
+- **Few E2E Tests**: Full API route tests with authentication
+
+## Implementation Notes
+
+### Current Implementation Details
+
+**Migration Loading** (Maintenance Note):
+- Currently hardcoded to `./lib/db/migrations/0000_stormy_dark_beast.sql`
+- Needs manual update when new migrations are added
+- Consider: Dynamic migration file discovery from migrations directory
+
+**Table Truncation** (Maintenance Note):
+- Hardcoded table list: `specs, posts, "user", "session", "account", verification`
+- Requires manual updates when schema changes
+- Consider: Query `information_schema.tables` for dynamic table list
+
+**Schema Persistence** (By Design):
+- Test schema structure persists between test runs
+- Only table data is truncated (via TRUNCATE)
+- Improves test startup performance significantly
+- Trade-off: Schema migrations must be manually re-applied if changed
+
+**Database Drivers** (Different but Compatible):
+- Production: `@neondatabase/serverless` (HTTP-based for serverless)
+- Tests: `postgres.js` (TCP-based for Node.js environments)
+- Both use standard PostgreSQL protocol
+- Difference is acceptable for testing purposes
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test file
+npm test modules/posts/tests/post.service.test.ts
+
+# Run tests in watch mode
+npm test -- --watch
+
+# Run tests with coverage
+npm test -- --coverage
+```
+
+### Debugging Tests
+
+```typescript
+import { getTestDb } from '@/tests/utils/test-database';
+
+it('should debug database state', async () => {
+  const testDb = getTestDb();
+
+  // Query test schema directly
+  const result = await testDb.execute(sql`
+    SELECT * FROM test.posts
+  `);
+
+  console.log('Current test data:', result);
+});
+```
+
+## Benefits Recap
+
+1. **Easy Testing**: DI container makes dependency swapping trivial
+2. **Real Integration**: Tests catch actual database issues
+3. **Fast & Reliable**: Schema persistence + table truncation = fast cleanup
+4. **No Brittle Mocks**: Real database, real behavior
+5. **BDD Workflow**: Test-first development from spec to implementation
+6. **Production Parity**: Same code, same database features
+7. **Complete Isolation**: Test schema prevents production conflicts
+8. **Clear Dependencies**: Explicit dependency graph via container

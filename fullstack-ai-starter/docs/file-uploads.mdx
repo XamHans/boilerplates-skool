@@ -1,0 +1,120 @@
+---
+title: 'File Uploads'
+description: 'Secure file upload system with Shadcn UI components and R2 storage'
+---
+
+# File Uploads
+
+## What
+
+A comprehensive file upload system built with Shadcn UI components, featuring secure file handling, R2 storage integration, and multiple upload interfaces.
+
+## Why
+
+- **Security**: Built-in validation, sanitization, and malware detection patterns
+- **Flexibility**: Multiple upload methods (Dashboard, Dropzone, Button) for different use cases
+- **Performance**: Direct R2 uploads with presigned URLs reduce server load
+- **Developer Experience**: Reusable components with TypeScript support
+
+## How
+
+### 1. Environment Setup
+
+```env
+R2_ACCOUNT_ID=your_account_id
+R2_ACCESS_KEY_ID=your_access_key
+R2_SECRET_ACCESS_KEY=your_secret_key
+R2_BUCKET_NAME=your_bucket_name
+```
+
+### 2. Basic Implementation
+
+Import and use the upload components in your application:
+
+```tsx
+import { FileUploadDropzone } from '@/components/file-upload';
+
+function MyComponent() {
+  return (
+    <FileUploadDropzone
+      uploadOptions={{
+        maxFileSize: 10 * 1024 * 1024, // 10MB
+        maxNumberOfFiles: 5,
+        allowedFileTypes: ['image/*', 'video/*'],
+        uploadMethod: 's3', // Direct upload to R2
+      }}
+      onStateChange={(state) => {
+        if (state.success) {
+          console.log('Files uploaded:', state.uploadedFiles);
+        }
+      }}
+    />
+  );
+}
+```
+
+### 3. Available Components
+
+- **FileUploadDashboard**: Full-featured upload interface with file management
+- **FileUploadDropzone**: Drag & drop interface with previews
+- **FileUploadButton**: Simple button for quick uploads
+
+## Example
+
+Complete working file upload with validation:
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+import { FileUploadDropzone } from '@/components/file-upload';
+
+export function ProfileImageUpload() {
+  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-4">
+      <FileUploadDropzone
+        uploadOptions={{
+          maxFileSize: 5 * 1024 * 1024, // 5MB
+          maxNumberOfFiles: 1,
+          allowedFileTypes: ['image/*'],
+          uploadMethod: 's3',
+        }}
+        showPreviews={true}
+        dropzoneText="Upload your profile picture"
+        onStateChange={(state) => {
+          if (state.success && state.uploadedFiles[0]) {
+            setUploadedFile(state.uploadedFiles[0].url);
+          }
+          if (state.error) {
+            console.error('Upload failed:', state.error);
+          }
+        }}
+      />
+
+      {uploadedFile && (
+        <div>
+          <p>Profile picture uploaded successfully!</p>
+          <img
+            src={uploadedFile}
+            alt="Profile"
+            className="w-32 h-32 rounded-full"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## Security Features
+
+- Filename sanitization and path traversal prevention
+- MIME type validation and extension filtering
+- File size limits and malware detection patterns
+- Secure filename generation with timestamps
+
+## Playground
+
+Visit `/playground/generate-text/file-upload` to test all upload features interactively with different file types and configurations.

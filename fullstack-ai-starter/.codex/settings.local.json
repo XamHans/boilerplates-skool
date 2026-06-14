@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__sequential-thinking__sequentialthinking",
+      "mcp__serena__get_symbols_overview",
+      "mcp__serena__find_file"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "playwright",
+    "serena",
+    "sequential-thinking",
+    "neon",
+    "browsertool",
+    "vercel",
+    "Better Auth"
+  ]
+}

@@ -1,0 +1,355 @@
+---
+title: "AI SDK Best Practices"
+description: "Production optimization strategies for AI applications including performance, cost management, and security"
+---
+
+# AI SDK Best Practices
+
+## What
+
+Production-ready strategies for optimizing AI-powered applications including performance optimization, cost management, security practices, and error handling patterns.
+
+## Why
+
+- **Performance**: Faster response times and better user experience
+- **Cost Control**: Optimize AI usage and reduce API costs
+- **Security**: Protect user data and prevent abuse
+- **Reliability**: Robust error handling and graceful degradation
+
+## How
+
+### Performance Optimization
+
+#### 1. Model Selection
+Choose the right model for your use case:
+
+```typescript
+// Fast and cost-effective for simple tasks
+const quickResponse = await generateText({
+  model: openai('gpt-3.5-turbo'),
+  prompt: 'Summarize this in one sentence: ...',
+});
+
+// Higher quality for complex tasks
+const detailedResponse = await generateText({
+  model: openai('gpt-4'),
+  prompt: 'Write a detailed analysis of...',
+});
+```
+
+#### 2. Streaming for Better UX
+Always use streaming for user-facing applications:
+
+```typescript
+// app/api/ai/chat/route.ts
+import { streamText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+import { auth } from '@/lib/auth';
+import { parseRequestBody } from '@/lib/validation/parse';
+import { handleResult } from '@/lib/api/handlers';
+
+const chatSchema = z.object({
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant', 'system']),
+    content: z.string(),
+  })),
+});
+
+export async function POST(request: Request) {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) {
+    return handleResult({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+  }
+
+  const bodyResult = await parseRequestBody(request, chatSchema);
+  if (!bodyResult.success) return handleResult(bodyResult);
+
+  const result = await streamText({
+    model: openai('gpt-3.5-turbo'),
+    messages: bodyResult.data.messages,
+  });
+
+  return result.toDataStreamResponse();
+}
+```
+
+#### 3. Response Caching
+Cache common responses to reduce API calls:
+
+```typescript
+import { unstable_cache } from 'next/cache';
+
+const getCachedResponse = unstable_cache(
+  async (prompt: string) => {
+    const { text } = await generateText({
+      model: openai('gpt-3.5-turbo'),
+      prompt,
+    });
+    return text;
+  },
+  ['ai-response'],
+  { revalidate: 3600 } // Cache for 1 hour
+);
+```
+
+### Cost Management
+
+#### 1. Token Limits
+Set appropriate limits to control costs:
+
+```typescript
+const { text } = await generateText({
+  model: openai('gpt-3.5-turbo'),
+  prompt: userPrompt,
+  maxTokens: 150, // Limit response length
+});
+```
+
+#### 2. Request Validation
+Validate inputs to prevent expensive requests:
+
+```typescript
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/handlers';
+import { parseRequestBody } from '@/lib/validation/parse';
+
+const generateSchema = z.object({
+  prompt: z.string().min(1).max(1000, 'Prompt too long'),
+});
+
+export const POST = withAuth(async (session, request) => {
+  const bodyResult = await parseRequestBody(request, generateSchema);
+  if (!bodyResult.success) return bodyResult;
+
+  const { prompt } = bodyResult.data;
+
+  // Check for repeated requests
+  const hash = createHash('md5').update(prompt).digest('hex');
+  const cached = await getCachedResponse(hash);
+  if (cached) return { success: true, data: { text: cached } };
+
+  const { text } = await generateText({
+    model: openai('gpt-3.5-turbo'),
+    prompt,
+  });
+
+  await setCachedResponse(hash, text);
+  return { success: true, data: { text } };
+});
+```
+
+#### 3. Usage Tracking
+Monitor AI usage per user:
+
+```typescript
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/handlers';
+import { parseRequestBody } from '@/lib/validation/parse';
+
+// Track usage in database
+const logAIUsage = async (userId: string, model: string, tokens: number) => {
+  await db.insert(aiUsage).values({
+    userId,
+    model,
+    tokens,
+    timestamp: new Date(),
+  });
+};
+
+const promptSchema = z.object({
+  prompt: z.string().min(1),
+});
+
+export const POST = withAuth(async (session, request) => {
+  const bodyResult = await parseRequestBody(request, promptSchema);
+  if (!bodyResult.success) return bodyResult;
+
+  const result = await generateText({
+    model: openai('gpt-3.5-turbo'),
+    prompt: bodyResult.data.prompt,
+  });
+
+  // Log usage
+  await logAIUsage(
+    session.user.id,
+    'gpt-3.5-turbo',
+    result.usage.totalTokens
+  );
+
+  return { success: true, data: { text: result.text } };
+});
+```
+
+### Security Best Practices
+
+#### 1. Input Sanitization
+Always sanitize user inputs:
+
+```typescript
+import DOMPurify from 'dompurify';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/handlers';
+import { parseRequestBody } from '@/lib/validation/parse';
+import type { Result } from '@/lib/result';
+
+const sanitizePrompt = (prompt: string): Result<string> => {
+  // Remove potentially harmful content
+  const clean = DOMPurify.sanitize(prompt);
+
+  // Additional validation
+  if (clean.includes('ignore previous instructions')) {
+    return { success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid prompt content' } };
+  }
+
+  return { success: true, data: clean };
+};
+
+const promptSchema = z.object({
+  prompt: z.string().min(1),
+});
+
+export const POST = withAuth(async (session, request) => {
+  const bodyResult = await parseRequestBody(request, promptSchema);
+  if (!bodyResult.success) return bodyResult;
+
+  const sanitizeResult = sanitizePrompt(bodyResult.data.prompt);
+  if (!sanitizeResult.success) return sanitizeResult;
+
+  // Use sanitized prompt
+  const { text } = await generateText({
+    model: openai('gpt-3.5-turbo'),
+    prompt: sanitizeResult.data,
+  });
+
+  return { success: true, data: { text } };
+});
+```
+
+#### 2. Rate Limiting
+Implement per-user rate limits:
+
+```typescript
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
+import { withAuth } from '@/lib/api/handlers';
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(10, '1 m'), // 10 requests per minute
+});
+
+export const POST = withAuth(async (session, request) => {
+  const { success } = await ratelimit.limit(session.user.id);
+
+  if (!success) {
+    return {
+      success: false,
+      error: { code: 'FORBIDDEN', message: 'Too many requests. Please try again later.' }
+    };
+  }
+
+  // Process request...
+});
+```
+
+#### 3. Content Filtering
+Filter AI responses for inappropriate content:
+
+```typescript
+const filterResponse = (text: string): string => {
+  // Implement content filtering logic
+  const sensitiveTerms = ['inappropriate', 'harmful'];
+
+  for (const term of sensitiveTerms) {
+    if (text.toLowerCase().includes(term)) {
+      return 'I apologize, but I cannot provide that type of content.';
+    }
+  }
+
+  return text;
+};
+```
+
+## Example
+
+Complete production-ready AI endpoint:
+
+```typescript
+// app/api/ai/generate-text/route.ts
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/handlers';
+import { parseRequestBody } from '@/lib/validation/parse';
+import { ratelimit, sanitizePrompt, filterResponse } from '@/lib/ai/utils';
+
+const generateSchema = z.object({
+  prompt: z.string().min(1).max(2000),
+});
+
+export const POST = withAuth(async (session, request) => {
+  // Rate limiting
+  const { success: rateLimitOk } = await ratelimit.limit(session.user.id);
+  if (!rateLimitOk) {
+    return { success: false, error: { code: 'FORBIDDEN', message: 'Too many requests' } };
+  }
+
+  // Parse and validate with Zod
+  const bodyResult = await parseRequestBody(request, generateSchema);
+  if (!bodyResult.success) return bodyResult;
+
+  // Input sanitization
+  const sanitizeResult = sanitizePrompt(bodyResult.data.prompt);
+  if (!sanitizeResult.success) return sanitizeResult;
+
+  const cleanPrompt = sanitizeResult.data;
+
+  // Check cache first
+  const cacheKey = createHash('md5').update(cleanPrompt).digest('hex');
+  const cached = await getCachedResponse(cacheKey);
+  if (cached) {
+    return { success: true, data: { text: cached, cached: true } };
+  }
+
+  // Generate text
+  const { text, usage } = await generateText({
+    model: openai('gpt-3.5-turbo'),
+    prompt: cleanPrompt,
+    maxTokens: 150,
+  });
+
+  // Filter response
+  const filteredText = filterResponse(text);
+
+  // Cache result
+  await setCachedResponse(cacheKey, filteredText);
+
+  // Log usage
+  await logAIUsage(session.user.id, 'gpt-3.5-turbo', usage.totalTokens);
+
+  return { success: true, data: { text: filteredText } };
+});
+```
+
+## Key Recommendations
+
+### Development
+- **Start Simple**: Begin with basic text generation, add complexity gradually
+- **Use TypeScript**: Leverage full type safety for better development experience
+- **Test Thoroughly**: Test with various inputs including edge cases
+
+### Production
+- **Monitor Usage**: Track tokens, costs, and performance metrics
+- **Implement Fallbacks**: Handle API failures gracefully
+- **User Feedback**: Collect user feedback to improve AI responses
+
+### Security
+- **Never Trust User Input**: Always validate and sanitize prompts
+- **Implement Rate Limits**: Prevent abuse and control costs
+- **Content Filtering**: Review AI outputs for inappropriate content
+
+### Performance
+- **Choose Right Models**: Balance cost vs quality for each use case
+- **Cache Common Responses**: Reduce API calls with intelligent caching
+- **Use Streaming**: Provide immediate feedback for better UX

@@ -1,0 +1,690 @@
+---
+title: 'Payment Integration with Stripe'
+description: 'Complete guide to integrating Stripe Checkout payments in your application'
+---
+
+## Overview
+
+The starter kit includes a complete Stripe Checkout integration with:
+- Payment creation with Stripe Checkout Sessions
+- Webhook handling for payment status updates (checkout.session.completed, payment_intent.succeeded/failed)
+- Payment history tracking
+- Secure API key management
+- Multi-currency support (135+ currencies including EUR, USD, GBP, JPY, and more)
+- Webhook signature verification using Stripe SDK
+- Dynamic pricing (no product catalog setup required)
+
+## Architecture
+
+```
+User Action → API Route → PaymentService → Stripe API (Create Checkout Session)
+                                ↓
+                          Database Storage
+                                ↓
+                    User redirects to Stripe Checkout
+                                ↓
+                    Stripe Webhook → Status Update
+```
+
+## Quick Start
+
+Get started with Stripe in 5 minutes:
+
+1. **Get Stripe API keys** from [dashboard.stripe.com/apikeys](https://dashboard.stripe.com/apikeys)
+2. **Configure environment variables** (see below)
+3. **Run database migration**: `pnpm db:migrate`
+4. **Setup webhooks** (Stripe CLI for local, Dashboard for production)
+5. **Start coding** - everything is ready to go!
+
+## Setting Up Stripe
+
+### 1. Create Stripe Account
+
+Sign up at [stripe.com](https://stripe.com/) and complete your business verification.
+
+### 2. Get API Keys
+
+1. Navigate to **Dashboard → Developers → API Keys**
+2. Copy your **test secret key** (starts with `sk_test_`)
+3. Copy your **test publishable key** (starts with `pk_test_`)
+4. For production, use your **live keys** (start with `sk_live_` and `pk_live_`)
+
+### 3. Configure Environment
+
+Add to `.env.local`:
+
+```bash
+# Stripe Secret Key (server-side only, NEVER expose to client)
+STRIPE_SECRET_KEY="sk_test_your-stripe-secret-key-here"
+
+# Stripe Publishable Key (safe for client-side use - for future Stripe Elements integration)
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="pk_test_your-stripe-publishable-key-here"
+
+# Stripe Webhook Signing Secret (for webhook signature verification)
+# Get this from: https://dashboard.stripe.com/webhooks (production)
+# Or from: stripe listen --print-secret (local development)
+STRIPE_WEBHOOK_SECRET="whsec_your-webhook-signing-secret-here"
+
+# Application URL (used for webhook and redirect URLs)
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
+```
+
+### 4. Run Database Migration
+
+```bash
+pnpm db:migrate
+```
+
+This creates the `payments` and `webhook_events` tables with Stripe-specific fields.
+
+### 5. Setup Webhooks
+
+#### Local Development (Stripe CLI)
+
+Install the Stripe CLI:
+
+```bash
+# macOS
+brew install stripe/stripe-cli/stripe
+
+# Linux
+# Download from: https://github.com/stripe/stripe-cli/releases
+
+# Windows
+scoop install stripe
+```
+
+Login to your Stripe account:
+
+```bash
+stripe login
+```
+
+Forward webhook events to your local server:
+
+```bash
+stripe listen --forward-to http://localhost:3000/api/payments/webhook
+```
+
+The CLI will output a webhook signing secret. Copy it to your `.env.local`:
+
+```bash
+STRIPE_WEBHOOK_SECRET="whsec_xxx"
+```
+
+Keep this terminal running while developing. It will show all webhook events in real-time.
+
+#### Production (Stripe Dashboard)
+
+1. Go to **Dashboard → Developers → Webhooks**
+2. Click **Add endpoint**
+3. Enter your webhook URL: `https://yourdomain.com/api/payments/webhook`
+4. Select events to listen to:
+   - `checkout.session.completed`
+   - `payment_intent.succeeded`
+   - `payment_intent.payment_failed`
+5. Copy the **Signing secret** (starts with `whsec_`)
+6. Add to your production environment variables
+
+## Creating a Payment
+
+### Backend (API Route)
+
+```typescript
+// app/api/custom-payment/route.ts
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/handlers';
+import { parseRequestBody } from '@/lib/validation/parse';
+import { withServices } from '@/lib/container/utils';
+
+const createPaymentSchema = z.object({
+  amount: z.string(),
+  currency: z.string().default('USD'),
+  description: z.string().optional(),
+  metadata: z.record(z.string()).optional(),
+});
+
+export const POST = withAuth(async (session, request) => {
+  const bodyResult = await parseRequestBody(request, createPaymentSchema);
+  if (!bodyResult.success) return bodyResult;
+
+  const { paymentService } = withServices('paymentService');
+
+  const result = await paymentService.createPayment(
+    {
+      ...bodyResult.data,
+      description: bodyResult.data.description || 'Premium Subscription',
+    },
+    session.user.id
+  );
+
+  if (!result.success) return result;
+
+  return { success: true, data: { payment: result.data } };
+});
+```
+
+### Frontend (React Component)
+
+```typescript
+'use client';
+
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+
+export function CheckoutButton() {
+  const [loading, setLoading] = useState(false);
+
+  const handlePayment = async () => {
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/custom-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Payment failed');
+      }
+
+      const payment = result.data?.payment || result.payment;
+
+      // Redirect to Stripe Checkout
+      window.location.href = payment.stripeCheckoutUrl;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Payment failed');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Button onClick={handlePayment} disabled={loading}>
+      {loading ? 'Processing...' : 'Pay Now'}
+    </Button>
+  );
+}
+```
+
+## Webhook Handling
+
+Stripe automatically calls `/api/payments/webhook` when payment events occur.
+
+### How Webhooks Work
+
+1. **Payment Event Occurs**: User completes/cancels payment in Stripe Checkout
+2. **Stripe Sends Webhook**: POST request to your webhook URL with event data
+3. **Signature Verification**: Your server verifies the request authenticity using Stripe SDK
+4. **Status Update**: Update payment status in database based on event type
+5. **Event Recording**: Store webhook event for audit trail
+
+### Handled Event Types
+
+- `checkout.session.completed`: Checkout session successfully completed
+- `payment_intent.succeeded`: Payment successfully processed
+- `payment_intent.payment_failed`: Payment failed
+
+### Webhook Security
+
+The webhook handler uses Stripe's official signature verification:
+
+```typescript
+// Stripe SDK handles all signature verification
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+  apiVersion: '2023-10-16',
+});
+
+// This will throw an error if signature is invalid
+const event = stripe.webhooks.constructEvent(
+  rawBody,
+  signature,
+  webhookSecret
+);
+```
+
+No custom HMAC verification needed - Stripe's SDK handles everything securely.
+
+## Payment States
+
+| Status | Description | User Action |
+|--------|-------------|-------------|
+| `pending` | Checkout session created, awaiting payment | Show checkout link |
+| `processing` | Payment being processed | Show loading state |
+| `succeeded` | Payment successful ✅ | Grant access/fulfill order |
+| `failed` | Payment failed ❌ | Show error, allow retry |
+| `canceled` | Checkout session expired or canceled | Create new payment |
+
+## Multi-Currency Support
+
+Stripe supports **135+ currencies** including:
+
+- **EUR** - Euro (€)
+- **USD** - US Dollar ($)
+- **GBP** - British Pound (£)
+- **JPY** - Japanese Yen (¥)
+- **CAD** - Canadian Dollar
+- **AUD** - Australian Dollar
+- **CHF** - Swiss Franc
+- **CNY** - Chinese Yuan
+- And many more...
+
+### Zero-Decimal Currencies
+
+Some currencies (JPY, KRW, etc.) don't use decimal places. Stripe handles this automatically:
+
+```typescript
+// For USD: "10.00" = $10.00
+await paymentService.createPayment({
+  amount: '10.00',
+  currency: 'USD',
+});
+
+// For JPY: "1000" = ¥1,000 (no decimals)
+await paymentService.createPayment({
+  amount: '1000',
+  currency: 'JPY',
+});
+```
+
+Check [Stripe's currency support](https://stripe.com/docs/currencies) for the full list.
+
+## Using the Payment Service
+
+### Get Payment by ID
+
+```typescript
+const { paymentService } = withServices('paymentService');
+
+const result = await paymentService.getPaymentById(paymentId);
+
+if (!result.success) {
+  // result.error contains { code: 'PAYMENT_NOT_FOUND', message: '...' }
+  return result;
+}
+
+const payment = result.data;
+```
+
+### List User Payments
+
+```typescript
+const payments = await paymentService.getUserPayments({
+  userId: session.user.id,
+  status: 'succeeded', // optional filter
+  limit: 20,
+  offset: 0,
+});
+```
+
+### Get Payment by Stripe IDs
+
+```typescript
+// By checkout session ID
+const payment = await paymentService.getPaymentByStripeSessionId('cs_test_xxx');
+
+// By payment intent ID
+const payment = await paymentService.getPaymentByStripeIntentId('pi_xxx');
+```
+
+## Stripe Products (Optional)
+
+The starter kit uses **dynamic pricing** by default - you don't need to create products in Stripe Dashboard. This is perfect for:
+
+- Variable amounts (donations, cart totals)
+- Dynamic pricing
+- Simple use cases without product catalogs
+
+### Current Implementation (Dynamic Pricing)
+
+```typescript
+// No product setup required!
+await paymentService.createPayment({
+  amount: '29.99',
+  currency: 'USD',
+  description: 'Custom payment',
+});
+```
+
+### To Use Stripe Products Instead
+
+If you want to use Stripe's product catalog:
+
+1. **Create products** in Stripe Dashboard → Products
+2. **Create prices** for each product
+3. **Modify PaymentService.createPayment()** to accept `priceId`
+4. **Update checkout session** to use:
+   ```typescript
+   line_items: [{ price: priceId, quantity: 1 }]
+   ```
+
+This is useful for:
+- Subscription plans
+- Fixed-price products
+- Product catalogs with multiple SKUs
+
+## Stripe MCP Server (Claude Code Integration)
+
+The starter kit includes Stripe MCP server configuration for Claude Code integration.
+
+This enables Claude Code to:
+- Fetch payment details during development
+- Query customer and subscription data
+- Trigger test webhook events
+- Inspect Stripe Dashboard data
+
+Configuration in `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "stripe": {
+      "command": "npx",
+      "args": ["-y", "@stripe/mcp-server-stripe@latest"],
+      "env": {
+        "STRIPE_SECRET_KEY": "${STRIPE_SECRET_KEY}"
+      }
+    }
+  }
+}
+```
+
+## Security Best Practices
+
+### 1. Never Expose Secret Keys Client-Side
+
+❌ **Don't do this:**
+```typescript
+// NEVER put secret keys in frontend code
+const stripe = new Stripe('sk_test_xxx');
+```
+
+✅ **Do this:**
+```typescript
+// Keep secret keys in backend services only
+export class PaymentService {
+  private stripe: Stripe;
+
+  constructor(private deps: ServiceDependencies) {
+    this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+      apiVersion: '2023-10-16',
+    });
+  }
+}
+```
+
+### 2. Always Verify Webhook Signatures
+
+The webhook handler uses Stripe's official `constructEvent()` method:
+
+```typescript
+// Stripe SDK handles signature verification
+const event = stripe.webhooks.constructEvent(
+  rawBody,
+  signature,
+  webhookSecret
+);
+// If signature is invalid, this throws an error
+```
+
+Never skip signature verification - this prevents attackers from sending fake webhook events.
+
+### 3. Use HTTPS for Webhooks
+
+Stripe requires HTTPS for webhook URLs in production. For local development, use the Stripe CLI (it creates a secure tunnel automatically).
+
+### 4. Store Minimal Payment Data
+
+Only store what you need. The integration stores:
+- Payment ID and Stripe IDs (payment intent, checkout session)
+- Amount, currency, description
+- Status and timestamps
+- Minimal metadata (orderId, productId)
+
+**Never store** credit card details - Stripe handles all sensitive data and is PCI compliant.
+
+### 5. Use Test Mode for Development
+
+Always use test keys (`sk_test_`, `pk_test_`) during development. Test cards:
+- Success: `4242 4242 4242 4242`
+- Decline: `4000 0000 0000 0002`
+- Authentication required: `4000 0025 0000 3155`
+
+See [Stripe test cards](https://stripe.com/docs/testing) for more.
+
+## Production Checklist
+
+Before going live:
+
+- [ ] Switch to live API keys (`sk_live_...` and `pk_live_...`)
+- [ ] Update `NEXT_PUBLIC_APP_URL` to your production domain
+- [ ] Configure webhook endpoint in Stripe Dashboard
+- [ ] Copy production webhook signing secret to environment variables
+- [ ] Test end-to-end payment flow with test cards
+- [ ] Enable production mode in Stripe Dashboard
+- [ ] Set up payment monitoring and alerts in Stripe Dashboard
+- [ ] Test webhook delivery (Stripe Dashboard shows webhook logs)
+- [ ] Configure proper error handling and logging
+- [ ] Test all payment flows (success, failure, cancellation)
+- [ ] Review PCI DSS compliance (Stripe handles this, but review your implementation)
+- [ ] Set up backup webhook URL (optional but recommended)
+
+## Troubleshooting
+
+### Webhook Not Receiving Events
+
+**Local Development:**
+- Is Stripe CLI running? (`stripe listen --forward-to ...`)
+- Check the CLI terminal for webhook events
+- Verify `STRIPE_WEBHOOK_SECRET` matches the CLI output
+
+**Production:**
+- Is webhook endpoint configured in Stripe Dashboard?
+- Check **Dashboard → Developers → Webhooks** for delivery logs
+- Test webhook URL with `curl` from outside your network
+- Verify HTTPS is enabled
+
+### Signature Verification Fails
+
+**Common issues:**
+- `STRIPE_WEBHOOK_SECRET` not set or incorrect
+- Using wrong secret (test vs live mode)
+- Body content modified before verification
+- Not using raw body (must use `request.text()`)
+
+**Debug:**
+Check Stripe Dashboard → Webhooks → [Your endpoint] → Attempts tab for detailed error logs.
+
+### Payment Creation Fails
+
+**Common issues:**
+- API key is incorrect or from wrong mode (test vs live)
+- Amount format is wrong (must be "10.00", not 10)
+- Currency not supported
+- Stripe account not activated
+
+**Check:**
+```typescript
+// Amount must be a string in format "X.XX" (except zero-decimal currencies)
+✅ amount: "10.00"  // USD
+✅ amount: "1000"   // JPY (zero-decimal)
+❌ amount: "10"     // Missing decimal
+❌ amount: 10       // Not a string
+```
+
+### Payment Status Not Updating
+
+**Check:**
+- Webhook events being received (check Stripe Dashboard or CLI)
+- Webhook signature verification passing
+- Database transaction completing successfully
+- Correct webhook secret configured
+
+**Test webhook manually:**
+Use Stripe CLI to trigger test events:
+```bash
+stripe trigger checkout.session.completed
+stripe trigger payment_intent.succeeded
+stripe trigger payment_intent.payment_failed
+```
+
+### Test vs Live Mode Mismatch
+
+Stripe has separate test and live modes. Make sure:
+- API keys match (both test or both live)
+- Webhook secret matches the mode
+- Use test cards in test mode, real cards in live mode
+
+## API Reference
+
+### POST /api/payments/create
+
+Create a new payment with Stripe Checkout.
+
+**Authentication**: Required
+
+**Request Body**:
+```json
+{
+  "amount": "10.00",
+  "currency": "USD",
+  "description": "Payment description",
+  "metadata": {
+    "orderId": "order_123",
+    "productId": "product_456"
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "payment": {
+    "id": "uuid",
+    "stripePaymentIntentId": "pi_xxx",
+    "stripeCheckoutSessionId": "cs_test_xxx",
+    "stripeCheckoutUrl": "https://checkout.stripe.com/c/pay/cs_test_xxx",
+    "amount": "10.00",
+    "currency": "USD",
+    "status": "pending",
+    "userId": "user_123",
+    "metadata": { ... },
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "expiresAt": "2024-01-01T01:00:00.000Z"
+  }
+}
+```
+
+### GET /api/payments
+
+List user payments.
+
+**Authentication**: Required
+
+**Query Parameters**:
+- `status` (optional): Filter by status (pending, succeeded, failed, etc.)
+- `limit` (optional): Max results (default: 20, max: 100)
+- `offset` (optional): Pagination offset (default: 0)
+
+**Response**:
+```json
+{
+  "payments": [
+    {
+      "id": "uuid",
+      "amount": "10.00",
+      "currency": "USD",
+      "status": "succeeded",
+      ...
+    }
+  ]
+}
+```
+
+### GET /api/payments/[id]
+
+Get payment details.
+
+**Authentication**: Required (must own payment)
+
+**Response**:
+```json
+{
+  "payment": {
+    "id": "uuid",
+    "stripePaymentIntentId": "pi_xxx",
+    "stripeCheckoutSessionId": "cs_test_xxx",
+    "amount": "10.00",
+    "status": "succeeded",
+    ...
+  }
+}
+```
+
+### POST /api/payments/webhook
+
+Stripe webhook endpoint.
+
+**Authentication**: None (validated by signature)
+
+**Headers**:
+- `stripe-signature`: Stripe webhook signature
+
+**Request Body**:
+Stripe event object (varies by event type)
+
+**Response**:
+```json
+{
+  "status": "ok"
+}
+```
+
+## Database Schema
+
+### payments table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | text (UUID) | Primary key |
+| stripePaymentIntentId | text | Stripe Payment Intent ID |
+| stripeCheckoutSessionId | text | Stripe Checkout Session ID (unique) |
+| stripeCheckoutUrl | text | Stripe Checkout URL |
+| amount | text | Payment amount (e.g., "10.00") |
+| currency | text | ISO 4217 currency code |
+| description | text | Payment description |
+| status | text | Payment status (pending, succeeded, failed, canceled) |
+| userId | text | User ID |
+| metadata | jsonb | Custom metadata |
+| createdAt | timestamp | Creation time |
+| updatedAt | timestamp | Last update time |
+| paidAt | timestamp | Payment completion time |
+| failedAt | timestamp | Payment failure time |
+| expiresAt | timestamp | Expiration time |
+
+### webhook_events table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | text (UUID) | Primary key |
+| paymentId | text | Reference to payment |
+| stripePaymentIntentId | text | Stripe Payment Intent ID |
+| stripeCheckoutSessionId | text | Stripe Checkout Session ID |
+| eventType | text | Stripe event type |
+| status | text | Payment status |
+| processed | boolean | Processing flag |
+| processedAt | timestamp | Processing time |
+| payload | jsonb | Raw webhook data |
+| createdAt | timestamp | Event time |
+
+## Resources
+
+- [Stripe API Documentation](https://stripe.com/docs/api)
+- [Stripe Checkout Documentation](https://stripe.com/docs/payments/checkout)
+- [Webhook Events Reference](https://stripe.com/docs/api/events/types)
+- [Testing Payments](https://stripe.com/docs/testing)
+- [Stripe CLI Documentation](https://stripe.com/docs/stripe-cli)
+- [Currencies Support](https://stripe.com/docs/currencies)
+- [Stripe MCP Server](https://github.com/stripe/stripe-mcp)

@@ -1,0 +1,192 @@
+---
+title: 'Observability'
+description: 'AI observability and analytics using Langfuse with automatic telemetry and performance tracking'
+---
+
+# Observability
+
+## What
+
+Comprehensive observability setup using Langfuse for AI model usage tracking, performance monitoring, and analytics. Automatically captures AI SDK interactions with detailed telemetry and user attribution.
+
+## Why
+
+- **Performance Monitoring**: Track response times, token usage, and costs
+- **Error Tracking**: Monitor failed requests and API issues
+- **User Analytics**: Understand usage patterns and popular features
+- **Cost Management**: Monitor AI usage and optimize spending
+
+## How
+
+### Setup and Configuration
+
+1. **Environment Variables**
+```env
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_BASEURL=https://cloud.langfuse.com
+```
+
+2. **Instrumentation Setup**
+```typescript
+// instrumentation.ts
+import { registerOTel } from '@vercel/otel';
+
+export function register() {
+  registerOTel({
+    serviceName: 'fullstack-ai-starter',
+    traceExporter: 'langfuse',
+  });
+}
+```
+
+3. **AI SDK Integration**
+```typescript
+// lib/api/ai-utils.ts
+export function withAITelemetry<T>(
+  config: T,
+  options: {
+    functionId: string;
+    metadata?: Record<string, any>;
+    recordInputs?: boolean;
+    recordOutputs?: boolean;
+  }
+) {
+  return {
+    ...config,
+    experimental_telemetry: {
+      isEnabled: true,
+      functionId: options.functionId,
+      metadata: options.metadata,
+    },
+  };
+}
+```
+
+### Integration in API Routes
+
+```typescript
+// app/api/ai/generate-text/route.ts
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+import { withAuth } from '@/lib/api/handlers';
+import { parseRequestBody } from '@/lib/validation/parse';
+import { withAITelemetry } from '@/lib/api/ai-utils';
+
+const generateSchema = z.object({
+  prompt: z.string().min(1),
+});
+
+export const POST = withAuth(async (session, req) => {
+  const bodyResult = await parseRequestBody(req, generateSchema);
+  if (!bodyResult.success) return bodyResult;
+
+  const { text } = await generateText(
+    withAITelemetry({
+      model: openai('gpt-3.5-turbo'),
+      prompt: bodyResult.data.prompt,
+    }, {
+      functionId: 'generate-text',
+      metadata: {
+        userId: session.user.id,
+      },
+    })
+  );
+
+  return { success: true, data: { text } };
+});
+```
+
+## Example
+
+Complete API route with observability:
+
+```typescript
+// app/api/ai/chat/route.ts
+import { streamText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { z } from 'zod';
+import { auth } from '@/lib/auth';
+import { parseRequestBody } from '@/lib/validation/parse';
+import { handleResult } from '@/lib/api/handlers';
+import { withAITelemetry } from '@/lib/api/ai-utils';
+
+const chatSchema = z.object({
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant', 'system']),
+    content: z.string(),
+  })),
+});
+
+// Note: Streaming endpoints return DataStreamResponse directly
+export async function POST(request: Request) {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) {
+    return handleResult({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+  }
+
+  const bodyResult = await parseRequestBody(request, chatSchema);
+  if (!bodyResult.success) return handleResult(bodyResult);
+
+  const result = await streamText(
+    withAITelemetry({
+      model: openai('gpt-3.5-turbo'),
+      messages: bodyResult.data.messages,
+    }, {
+      functionId: 'chat-completion',
+      metadata: {
+        userId: session.user.id,
+        conversationLength: bodyResult.data.messages.length,
+        feature: 'ai-chat',
+      },
+      recordInputs: true,
+      recordOutputs: true,
+    })
+  );
+
+  return result.toDataStreamResponse();
+}
+```
+
+## What You'll See
+
+### Dashboard Analytics
+- Request volume and success rates
+- Average response times and token usage
+- Cost tracking across different models
+- User activity and popular prompts
+
+### Individual Traces
+- Complete request/response data
+- Model parameters and execution timeline
+- Error details and debugging information
+- Performance metrics and token counts
+
+## Privacy Controls
+
+Control what data gets recorded:
+
+```typescript
+withAITelemetry({
+  model: openai('gpt-3.5-turbo'),
+  prompt: sensitivePrompt,
+}, {
+  functionId: 'sensitive-operation',
+  recordInputs: false,  // Don't log prompts
+  recordOutputs: false, // Don't log responses
+  metadata: {
+    userId: session.userId,
+    dataType: 'sensitive',
+  },
+});
+```
+
+## Automatic Features
+
+The AI SDK automatically captures:
+- Performance metrics (response times, tokens/second)
+- Usage data (prompt tokens, completion tokens, costs)
+- Model information (provider, model ID, timestamps)
+- Error handling (finish reasons, error spans)
+- Tool call tracing (if using function calling)

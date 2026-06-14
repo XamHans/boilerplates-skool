@@ -1,0 +1,235 @@
+---
+title: 'Authentication'
+description: 'Secure authentication system using better-auth with social providers and session management'
+---
+
+# Authentication
+
+## What
+
+A secure authentication system built with better-auth, supporting email/password and social provider authentication with session management and database integration.
+
+## Why
+
+- **Security**: Built-in protection against common authentication vulnerabilities
+- **Flexibility**: Support for multiple authentication methods (email, social providers)
+- **Session Management**: Secure session handling with automatic renewal
+- **Email Delivery**: Integrated with Resend for reliable email delivery
+- **Database Integration**: Seamless integration with Drizzle ORM
+
+## How
+
+### Setup and Configuration
+
+1. **Install Dependencies**
+
+```bash
+npm install better-auth
+```
+
+2. **Environment Variables**
+
+```env
+BETTER_AUTH_SECRET=your-secret-key
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+```
+
+3. **Authentication Configuration**
+
+```typescript
+// lib/auth.ts
+import { betterAuth } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { db } from '@/lib/db';
+
+export const auth = betterAuth({
+  database: drizzleAdapter(db, {
+    provider: 'pg',
+  }),
+  emailAndPassword: {
+    enabled: true,
+  },
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    },
+  },
+});
+```
+
+### Integration Steps
+
+1. Create authentication tables in your database
+2. Configure better-auth with your database adapter
+3. Set up social provider credentials
+4. Implement authentication middleware
+5. Use authentication in API routes
+
+## Example
+
+### 1. Protected API Route
+
+```typescript
+// app/api/profile/route.ts
+import { withAuth } from '@/lib/api/handlers';
+
+export const GET = withAuth(async (session, request) => {
+  // User is authenticated, session contains user data
+  return {
+    success: true,
+    data: {
+      user: session.user,
+      message: 'Profile data retrieved successfully',
+    }
+  };
+});
+```
+
+### 2. Client-Side Authentication
+
+Create a shared Better Auth client once and reuse it anywhere on the client:
+
+```typescript
+// lib/auth-client.ts
+import { createAuthClient } from 'better-auth/react';
+
+export const authClient = createAuthClient({});
+
+export const { signIn, signUp, signOut, useSession, getSession } = authClient;
+```
+
+#### Email and Password Sign-In
+
+Use the generated helpers in client components instead of writing manual fetch calls. The helpers handle request state, cookie management, and keep the session store in sync.
+
+```tsx
+// components/auth/login-form.tsx
+'use client';
+
+import { FormEvent, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { signIn } from '@/lib/auth-client';
+
+export function LoginForm() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setErrorMessage(null);
+    setIsSubmitting(true);
+
+    const { error } = await signIn.email(
+      {
+        email,
+        password,
+        callbackURL: '/playground/generate-text',
+      },
+      {
+        onError: ({ error }) => setErrorMessage(error.message),
+        onSuccess: () => router.push('/playground/generate-text'),
+      },
+    );
+
+    if (error) {
+      setErrorMessage(error.message);
+    }
+
+    setIsSubmitting(false);
+  };
+
+  return (
+    <form onSubmit={handleLogin} className="space-y-4">
+      <input
+        type="email"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+        placeholder="Email"
+        required
+      />
+      <input
+        type="password"
+        value={password}
+        onChange={(event) => setPassword(event.target.value)}
+        placeholder="Password"
+        required
+      />
+      {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
+      <Button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? 'Signing in…' : 'Sign In'}
+      </Button>
+    </form>
+  );
+}
+```
+
+#### Reading Session Data
+
+Any client component can read the authenticated user with the `useSession` hook. The hook stays updated when the session changes (for example, after calling `signOut`).
+
+```tsx
+// components/auth/user-status.tsx
+'use client';
+
+import { useSession, signOut } from '@/lib/auth-client';
+
+export function UserStatus() {
+  const { data: session, isPending, error } = useSession();
+  const handleSignOut = async () => {
+    await signOut();
+  };
+
+  if (isPending) return <p>Loading session…</p>;
+  if (error) return <p>Unable to load session.</p>;
+  if (!session?.user) return <p>Signed out</p>;
+
+  return (
+    <div className="flex items-center gap-2">
+      <span>{session.user.email}</span>
+      <button onClick={handleSignOut}>Sign out</button>
+    </div>
+  );
+}
+```
+
+When you need to fetch the current session on demand (for example inside a TanStack Query), call `getSession`. It returns the same `{ data, error }` object shape.
+
+```ts
+const { data: session } = await getSession();
+```
+
+### 3. Session Management
+
+```typescript
+// lib/auth-utils.ts
+import { auth } from '@/lib/auth';
+
+export async function getCurrentUser(request: Request) {
+  const session = await auth.api.getSession({
+    headers: request.headers,
+  });
+
+  return session?.user || null;
+}
+
+export async function requireAuth(request: Request) {
+  const user = await getCurrentUser(request);
+  if (!user) {
+    throw new Error('Authentication required');
+  }
+  return user;
+}
+```
+
+## Key Features
+
+- **Multiple Auth Methods**: Email/password and social provider authentication
+- **Session Security**: Automatic session renewal and secure cookie handling
+- **API Integration**: Easy integration with API routes through wrappers
+- **Database Sync**: User data automatically synced with your database

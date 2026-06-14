@@ -1,0 +1,219 @@
+---
+title: 'Umami Analytics'
+description: 'Privacy-focused web analytics with automatic page tracking and custom events'
+---
+
+# Umami Analytics
+
+## What
+
+Privacy-focused web analytics using Umami that tracks essential website metrics without cookies or personal data collection. Provides insights into page views, user behavior, and custom events while remaining GDPR compliant.
+
+## Why
+
+- **Privacy First**: No cookies or personal data collection, fully GDPR compliant
+- **Lightweight**: Minimal impact on page performance
+- **Essential Metrics**: Focus on actionable insights without data overload
+- **Self-Hostable**: Full control over your analytics data
+
+## How
+
+### Setup and Configuration
+
+1. **Environment Variables**
+```env
+NEXT_PUBLIC_UMAMI_WEBSITE_ID=your-website-id
+NEXT_PUBLIC_UMAMI_URL=https://analytics.yourdomain.com
+```
+
+2. **Analytics Integration**
+```typescript
+// lib/services/analytics.ts
+export class AnalyticsService {
+  private websiteId: string;
+  private baseUrl: string;
+
+  constructor() {
+    this.websiteId = process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID!;
+    this.baseUrl = process.env.NEXT_PUBLIC_UMAMI_URL!;
+  }
+
+  track(eventName: string, eventData?: Record<string, any>) {
+    if (typeof window !== 'undefined' && window.umami) {
+      window.umami.track(eventName, eventData);
+    }
+  }
+
+  trackPageView(url?: string) {
+    if (typeof window !== 'undefined' && window.umami) {
+      window.umami.track(url || window.location.pathname);
+    }
+  }
+}
+
+export const analytics = new AnalyticsService();
+```
+
+3. **Script Integration**
+```tsx
+// app/layout.tsx
+import Script from 'next/script';
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html>
+      <body>
+        {children}
+        <Script
+          src={`${process.env.NEXT_PUBLIC_UMAMI_URL}/script.js`}
+          data-website-id={process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID}
+          strategy="afterInteractive"
+        />
+      </body>
+    </html>
+  );
+}
+```
+
+### Custom Event Tracking
+
+Track specific user interactions and business events:
+
+```typescript
+// components/features/track-events.tsx
+import { analytics } from '@/lib/services/analytics';
+
+export function FeatureComponent() {
+  const handleAIGeneration = async () => {
+    // Track AI usage
+    analytics.track('ai-text-generated', {
+      model: 'gpt-3.5-turbo',
+      promptLength: prompt.length,
+    });
+  };
+
+  const handleFileUpload = (fileType: string, fileSize: number) => {
+    // Track file uploads
+    analytics.track('file-uploaded', {
+      fileType,
+      fileSize,
+      component: 'dropzone',
+    });
+  };
+
+  const handleFeatureUsage = (feature: string) => {
+    // Track feature usage
+    analytics.track('feature-used', {
+      feature,
+      timestamp: Date.now(),
+    });
+  };
+
+  return (
+    // Your component JSX
+  );
+}
+```
+
+## Example
+
+Complete analytics integration for an AI-powered component:
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+import { analytics } from '@/lib/services/analytics';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+
+export function AITextGenerator() {
+  const [prompt, setPrompt] = useState('');
+  const [result, setResult] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const generateText = async () => {
+    const startTime = Date.now();
+    setLoading(true);
+
+    try {
+      // Track generation start
+      analytics.track('ai-generation-started', {
+        promptLength: prompt.length,
+        feature: 'text-generator',
+      });
+
+      const response = await fetch('/api/ai/generate-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+
+      const data = await response.json();
+      setResult(data.text);
+
+      // Track successful generation
+      analytics.track('ai-generation-completed', {
+        promptLength: prompt.length,
+        responseLength: data.text.length,
+        duration: Date.now() - startTime,
+        success: true,
+      });
+
+    } catch (error) {
+      // Track errors
+      analytics.track('ai-generation-failed', {
+        promptLength: prompt.length,
+        error: error.message,
+        duration: Date.now() - startTime,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder="Enter your prompt..."
+        onFocus={() => analytics.track('prompt-input-focused')}
+      />
+      <Button onClick={generateText} disabled={loading}>
+        {loading ? 'Generating...' : 'Generate Text'}
+      </Button>
+      {result && (
+        <div className="p-4 bg-gray-50 rounded-lg">
+          <p>{result}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## Available Metrics
+
+### Automatic Tracking
+- Page views and unique visitors
+- Session duration and bounce rate
+- Referrer sources and geographic data
+- Device and browser information
+
+### Custom Events
+- AI model usage and performance
+- File upload patterns and types
+- Feature adoption and user flows
+- Error rates and debugging data
+
+## Privacy Features
+
+- **No Cookies**: Uses localStorage for session tracking only
+- **Anonymous Data**: No personal information collected
+- **GDPR Compliant**: Meets all privacy regulations
+- **User Control**: Easy opt-out mechanisms available

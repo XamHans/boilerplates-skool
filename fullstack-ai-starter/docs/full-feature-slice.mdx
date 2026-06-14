@@ -1,0 +1,231 @@
+---
+title: 'Full Feature Slice'
+description: 'A comprehensive guide to building a full feature slice from database to UI'
+---
+
+# Full Feature Slice Guide
+
+This guide breaks down how to implement a complete feature slice in our architecture, using the **Posts** module as a reference example. We'll trace the flow from the database layer all the way up to the React UI.
+
+## Architecture Overview
+
+Our architecture follows a strictly layered approach to ensure clean separation of concerns and type safety:
+
+1.  **Database Layer**: Drizzle ORM schema and migrations
+2.  **Domain Layer**: Types and Zod schemas
+3.  **Service Layer**: Business logic with dependency injection
+4.  **API Layer**: Next.js Route Handlers with `Result<T>` pattern
+5.  **UI Layer**: React components using TanStack Query
+
+---
+
+## 1. Database Layer
+
+We use Drizzle ORM for type-safe database interactions. Define your table schema in `modules/{feature}/schema.ts`.
+
+```typescript
+// modules/posts/schema.ts
+import { boolean, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+
+export const posts = pgTable('posts', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  authorId: text('author_id').notNull(), // Foreign key to users
+  published: boolean('published').default(false).notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()).notNull(),
+});
+```
+
+**Workflow:**
+1.  Define the schema.
+2.  Run `npm run db:generate` to create the migration.
+3.  Run `npm run db:migrate` to apply changes.
+
+---
+
+## 2. Domain Layer
+
+Define the TypeScript interfaces and Zod schemas that represent your data. This ensures type consistency across the frontend and backend.
+
+```typescript
+// modules/posts/types.ts
+export interface Post {
+  id: string;
+  title: string;
+  content: string;
+  authorId: string;
+  published: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreatePostInput {
+  title: string;
+  content: string;
+  published?: boolean;
+}
+```
+
+```typescript
+// modules/posts/schemas.ts
+import { z } from 'zod';
+
+export const createPostSchema = z.object({
+  title: z.string().min(1, 'Title required').max(200),
+  content: z.string().min(1, 'Content required'),
+  published: z.boolean().default(false),
+});
+```
+
+---
+
+## 3. Service Layer
+
+The service layer contains the core business logic. It should be framework-agnostic (no Next.js specific code like `NextResponse`). Use the `Result<T>` pattern for return values.
+
+```typescript
+// modules/posts/services/post.service.ts
+import { eq } from 'drizzle-orm';
+import type { Result } from '@/lib/result';
+import type { ServiceDependencies } from '@/lib/container/types';
+import { posts } from '../schema';
+
+export class PostService {
+  constructor(private deps: ServiceDependencies) {}
+
+  async createPost(data: CreatePostInput, authorId: string): Promise<Result<Post>> {
+    try {
+      const [post] = await this.deps.db
+        .insert(posts)
+        .values({ ...data, authorId })
+        .returning();
+
+      return { success: true, data: post };
+    } catch (error) {
+      return {
+        success: false,
+        error: { code: 'DATABASE_ERROR', message: 'Failed to create post', cause: error },
+      };
+    }
+  }
+
+  async getPostById(id: string): Promise<Result<Post>> {
+    const [post] = await this.deps.db.select().from(posts).where(eq(posts.id, id));
+    
+    if (!post) {
+      return { 
+        success: false, 
+        error: { code: 'POST_NOT_FOUND', message: 'Post not found' } 
+      };
+    }
+    
+    return { success: true, data: post };
+  }
+}
+```
+
+---
+
+## 4. API Layer
+
+Identify your routes and expose them via Next.js Route Handlers. Use `withAuth` for protected routes and `withHandler` for public ones.
+
+```typescript
+// app/api/posts/route.ts
+import { withAuth } from '@/lib/api/handlers';
+import { parseRequestBody } from '@/lib/validation/parse';
+import { withServices } from '@/lib/container/utils';
+import { createPostSchema } from '@/modules/posts/schemas';
+
+export const POST = withAuth(async (session, req) => {
+  const bodyResult = await parseRequestBody(req, createPostSchema);
+  if (!bodyResult.success) return bodyResult;
+
+  const { postService } = withServices('postService');
+  return postService.createPost(bodyResult.data, session.user.id);
+});
+```
+
+---
+
+## 5. UI Layer
+
+Use **TanStack Query** for data fetching and mutations. This handles caching, loading states, and error handling automatically.
+
+### Custom Hook
+
+```typescript
+// modules/posts/hooks/use-posts.ts
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSession } from '@/lib/auth-client';
+
+export function useCreatePost() {
+  const queryClient = useQueryClient();
+  const { data: session } = useSession();
+
+  return useMutation({
+    mutationFn: async (data: CreatePostInput) => {
+      const res = await fetch('/api/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (!result.success) throw new Error(result.error.message);
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+    },
+  });
+}
+```
+
+### Component
+
+```tsx
+// app/(main)/posts/create/page.tsx
+'use client';
+
+import { useCreatePost } from '@/modules/posts/hooks/use-posts';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useState } from 'react';
+
+export default function CreatePostPage() {
+  const { mutate, isPending } = useCreatePost();
+  const [title, setTitle] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    mutate({ title, content: 'Default content', published: true });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <Input 
+        value={title} 
+        onChange={(e) => setTitle(e.target.value)} 
+        placeholder="Post Title" 
+      />
+      <Button type="submit" disabled={isPending}>
+        {isPending ? 'Creating...' : 'Create Post'}
+      </Button>
+    </form>
+  );
+}
+```
+
+## Summary
+
+1.  **Define Schema**: `modules/posts/schema.ts`
+2.  **Define Types**: `modules/posts/types.ts` & `schemas.ts`
+3.  **Implement Logic**: `modules/posts/services/post.service.ts`
+4.  **Expose API**: `app/api/posts/route.ts`
+5.  **Build UI**: React Component + TanStack Query Hook
+
+This pattern ensures that your application is scalable, testable, and robust.

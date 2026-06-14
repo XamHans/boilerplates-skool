@@ -1,0 +1,102 @@
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --node-ip=0.0.0.0
+    ports:
+      - "7880:7880"  # HTTP
+      - "7881:7881"  # WebSocket
+      - "7882:7882"  # RTC/UDP
+    environment:
+      - "LIVEKIT_KEYS=devkey: secret"
+    restart: unless-stopped
+    networks:
+      - livekit-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7880"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  agent:
+    build: ./agent
+    env_file:
+      - .env
+    depends_on:
+      livekit:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ELEVEN_API_KEY=${ELEVEN_API_KEY}
+      - ELEVEN_VOICE_ID=${ELEVEN_VOICE_ID}
+      - AGENT_NAME=${AGENT_NAME:-Lüneburg Assistant}
+      - DATABASE_URL=postgresql://rag_user:${POSTGRES_PASSWORD:-rag_pass_dev}@postgres:5432/rag_db
+    volumes:
+      - ./agent/data/knowledge_base_raw_files:/app/data/knowledge_base_raw_files:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - livekit-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  ui:
+    build: ./ui
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      livekit:
+        condition: service_healthy
+    environment:
+      - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-secret}
+      - NEXT_PUBLIC_LIVEKIT_URL=${NEXT_PUBLIC_LIVEKIT_URL:-ws://localhost:7880}
+    restart: unless-stopped
+    networks:
+      - livekit-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      - POSTGRES_DB=rag_db
+      - POSTGRES_USER=rag_user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-rag_pass_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./agent/scripts/init_db.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    restart: unless-stopped
+    networks:
+      - livekit-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag_user -d rag_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  livekit-net:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,0 +1,93 @@
+---
+title: 'Quick Start Guide'
+description: 'Get your AI-powered application running in minutes with this step-by-step setup guide'
+---
+
+Get from zero to a fully functional AI application in under 5 minutes. This guide walks you through installation, configuration, and verification.
+
+## Prerequisites
+
+- **Node.js** (v18+)
+- **PostgreSQL** database (or Neon account)
+- **AI Provider API Key** (OpenAI, Anthropic, etc.)
+
+## Installation
+
+<Steps>
+  <Step title="Clone and install">
+    ```bash
+    git clone https://github.com/yourcompany/fullstack-ai-starter.git
+    cd fullstack-ai-starter
+    npm install
+    ```
+  </Step>
+
+  <Step title="Environment setup">
+    Copy the example file and add your credentials:
+    ```bash
+    cp .env.example .env.local
+    ```
+
+    Essential environment variables:
+    ```env
+    # Database
+    DATABASE_URL="postgresql://user:password@localhost:5432/mydb"
+
+    # AI Providers
+    OPENAI_API_KEY="sk-..."
+    ANTHROPIC_API_KEY="sk-ant-..."
+
+    # Authentication
+    BETTER_AUTH_SECRET="your-secret-key"
+    GOOGLE_CLIENT_ID="your-google-client-id"
+    GOOGLE_CLIENT_SECRET="your-google-client-secret"
+
+    # File Storage (R2/S3)
+    R2_ACCOUNT_ID="your-account-id"
+    R2_ACCESS_KEY_ID="your-access-key"
+    R2_SECRET_ACCESS_KEY="your-secret-key"
+    R2_BUCKET_NAME="your-bucket"
+
+    # Analytics (optional)
+    NEXT_PUBLIC_UMAMI_WEBSITE_ID="your-umami-id"
+    LANGFUSE_SECRET_KEY="sk-lf-..."
+    ```
+
+  </Step>
+
+<Step title="Database setup">
+  Run migrations to create tables: ```bash npm run db:generate npm run
+  db:migrate ```
+</Step>
+
+  <Step title="Start development">
+    ```bash
+    npm run dev
+    ```
+    Visit http://localhost:3000
+  </Step>
+</Steps>
+
+## Verify Setup
+
+Test each feature to confirm everything works:
+
+1. **Homepage**: Visit http://localhost:3000
+2. **Authentication**: Sign up/login with email or Google
+3. **AI Generation**: Visit `/playground/generate-text`
+4. **File Uploads**: Visit `/playground/file-upload`
+5. **Chat Interface**: Visit `/playground/chat`
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Build AI Features" icon="robot" href="/ai-overview">
+    Add text generation, chat interfaces, and streaming responses to your app.
+  </Card>
+  <Card title="Configure Platform" icon="server" href="/authentication">
+    Set up authentication, database connections, and file uploads.
+  </Card>
+  <Card title="Monitor & Analyze" icon="chart-line" href="/observability">
+    Track AI usage, performance, and user analytics in production.
+  </Card>
+</CardGroup>
