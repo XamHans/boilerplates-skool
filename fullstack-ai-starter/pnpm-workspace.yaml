@@ -6,3 +6,8 @@ allowBuilds:
   msw: true
   protobufjs: true
   sharp: true
+
+# Don't re-run `pnpm install` before every `pnpm run` script. The pre-run
+# dependency check would otherwise block `pnpm test` on the harmless
+# "ignored build scripts" notice for optional native transitive deps.
+verifyDepsBeforeRun: false
