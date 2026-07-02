@@ -173,12 +173,19 @@ export class PaymentService {
    * @param id Internal payment ID (UUID)
    * @returns Payment record or undefined if not found
    */
-  async getPaymentById(id: string): Promise<Payment | undefined> {
-    this.logger.debug('Fetching payment by ID', { paymentId: id });
+  async getPaymentById(id: string): Promise<Result<Payment>> {
+    this.logger.debug('Fetching payment by ID', { operation: 'getPaymentById', paymentId: id });
 
-    const [payment] = await this.deps.db.select().from(payments).where(eq(payments.id, id));
+    const [payment] = await this.ctx.db.select().from(payments).where(eq(payments.id, id));
 
-    return payment;
+    if (!payment) {
+      return {
+        success: false,
+        error: { code: 'PAYMENT_NOT_FOUND', message: 'Payment not found' },
+      };
+    }
+
+    return { success: true, data: payment };
   }
 
   /**
@@ -187,7 +194,7 @@ export class PaymentService {
   async getPaymentByStripeIntentId(stripePaymentIntentId: string): Promise<Payment | undefined> {
     this.logger.debug('Fetching payment by Stripe intent ID', { stripePaymentIntentId });
 
-    const [payment] = await this.deps.db
+    const [payment] = await this.ctx.db
       .select()
       .from(payments)
       .where(eq(payments.stripePaymentIntentId, stripePaymentIntentId));
@@ -201,7 +208,7 @@ export class PaymentService {
   async getPaymentByStripeSessionId(stripeCheckoutSessionId: string): Promise<Payment | undefined> {
     this.logger.debug('Fetching payment by Stripe session ID', { stripeCheckoutSessionId });
 
-    const [payment] = await this.deps.db
+    const [payment] = await this.ctx.db
       .select()
       .from(payments)
       .where(eq(payments.stripeCheckoutSessionId, stripeCheckoutSessionId));
@@ -339,25 +346,42 @@ export class PaymentService {
    * @param filters Filtering options (userId, status, limit, offset)
    * @returns Array of payment records
    */
-  async getUserPayments(filters: PaymentFilters): Promise<Payment[]> {
+  async getUserPayments(filters: PaymentFilters): Promise<Result<Payment[]>> {
     const { userId, status, limit = 20, offset = 0 } = filters;
 
-    this.logger.debug('Fetching user payments', { userId, status, limit, offset });
+    this.logger.debug('Fetching user payments', {
+      operation: 'getUserPayments',
+      userId,
+      status,
+      limit,
+      offset,
+    });
 
-    const result = await this.ctx.db
-      .select()
-      .from(payments)
-      .where(
-        and(
-          userId ? eq(payments.userId, userId) : undefined,
-          status ? eq(payments.status, status) : undefined,
-        ),
-      )
-      .orderBy(desc(payments.createdAt))
-      .limit(limit)
-      .offset(offset);
+    try {
+      const result = await this.ctx.db
+        .select()
+        .from(payments)
+        .where(
+          and(
+            userId ? eq(payments.userId, userId) : undefined,
+            status ? eq(payments.status, status) : undefined,
+          ),
+        )
+        .orderBy(desc(payments.createdAt))
+        .limit(limit)
+        .offset(offset);
 
-    return result;
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Failed to fetch user payments', {
+        error: error instanceof Error ? error : new Error(String(error)),
+        context: { operation: 'getUserPayments', userId, status },
+      });
+      return {
+        success: false,
+        error: { code: 'DATABASE_ERROR', message: 'Failed to fetch payments', cause: error },
+      };
+    }
   }
 
   /**

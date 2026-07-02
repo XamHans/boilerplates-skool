@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { usePayments } from '@/app/(main)/payments/hooks/use-payments';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -12,7 +11,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import type { Payment } from '@/modules/payments/types';
 
 const statusColors: Record<string, string> = {
   paid: 'bg-green-500',
@@ -24,37 +22,22 @@ const statusColors: Record<string, string> = {
 };
 
 export function PaymentList() {
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: payments, isPending, isError, error } = usePayments();
 
-  useEffect(() => {
-    fetchPayments();
-  }, []);
-
-  const fetchPayments = async () => {
-    try {
-      const response = await fetch('/api/payments');
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to fetch payments');
-      }
-
-      const data = result.data?.payments || result.payments;
-      setPayments(data);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to fetch payments');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading) {
+  if (isPending) {
     return (
       <div className="space-y-3">
         <Skeleton className="h-12 w-full" />
         <Skeleton className="h-12 w-full" />
         <Skeleton className="h-12 w-full" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="text-center py-8 text-destructive">
+        {error instanceof Error ? error.message : 'Failed to fetch payments'}
       </div>
     );
   }
