@@ -24,7 +24,6 @@ Production-grade Next.js 15 starter for shipping AI SaaS that stays maintainable
 3. `cp .env.example .env.local` and add database, AI provider, auth, storage, and analytics keys.
 4. Prime the database: `pnpm db:generate && pnpm db:migrate`.
 5. Run the app: `pnpm dev` and visit `http://localhost:3000`.
-6. Docs are available via `pnpm docs` or by reading the `.mdx` files in `docs/`.
 
 ## Payments (Stripe)
 
@@ -43,7 +42,7 @@ Get started with Stripe Checkout in minutes:
    ```
 4. Run migrations: `pnpm db:migrate`
 
-See [Payment Integration Guide](./docs/payment-integration.mdx) for full details.
+The payment slice (`modules/payments`, `app/api/payments`, `app/(main)/payments`) is a complete working reference.
 
 ## Keep your fork updated
 - Leave `origin` pointing at your fork and add this starter as an `upstream` remote: `git remote add upstream https://github.com/our-org/starter-kit.git`.
@@ -53,6 +52,6 @@ See [Payment Integration Guide](./docs/payment-integration.mdx) for full details
 - Keep notes on tweaks you reapply each update so future merges stay quick; try the flow on a scratch branch first if you want a dry run.
 
 ## Need details?
-- Deployment, auth, database, and AI guides live in `docs/*.mdx`.
-- Testing patterns and DI examples: `docs/testing.mdx`.
-- Observability and analytics setup: `docs/observability.mdx` and `docs/umami-analytics.mdx`.
+- Conventions and architecture: `CLAUDE.md` (backend/frontend rules, testing, gotchas).
+- Feature workflow and patterns: `.claude/` (`CLAUDE.md`, `IMPLEMENTATION-PATTERNS.md`, the `/build` skill).
+- Reference implementations: `modules/posts` and `modules/payments`.

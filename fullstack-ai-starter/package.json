@@ -8,7 +8,6 @@
     "dev": "next dev",
     "lint": "next lint",
     "start": "next start",
-    "docs": "cd docs && npx mint dev --port 3333",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx lib/db/scripts/migrate.ts",
     "db:seed": "tsx lib/db/scripts/seed.ts",
