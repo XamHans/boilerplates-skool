@@ -9,7 +9,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: ['**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}', '**/*.feature'],
-    exclude: ['**/node_modules/**', '**/dist/**', '**/*.integration.test.*'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/*.integration.test.*', '**/e2e/**'],
     hookTimeout: 30000,
   },
   resolve: {
