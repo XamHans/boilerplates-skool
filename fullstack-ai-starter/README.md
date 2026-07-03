@@ -52,6 +52,7 @@ The payment slice (`modules/payments`, `app/api/payments`, `app/(main)/payments`
 - Keep notes on tweaks you reapply each update so future merges stay quick; try the flow on a scratch branch first if you want a dry run.
 
 ## Need details?
-- Conventions and architecture: `CLAUDE.md` (backend/frontend rules, testing, gotchas).
-- Feature workflow and patterns: `.claude/` (`CLAUDE.md`, `IMPLEMENTATION-PATTERNS.md`, the `/build` skill).
+- Conventions and architecture: `CLAUDE.md` (stack, commands, the feature-slice map, golden rules).
+- Layer-specific rules: `.claude/rules/` (`backend.md`, `frontend.md`, `testing.md`) — auto-loaded when you edit matching files.
+- Feature workflow: the `/build` and `/implement` skills in `.claude/skills/`.
 - Reference implementations: `modules/posts` and `modules/payments`.
