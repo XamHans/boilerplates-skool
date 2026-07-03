@@ -10,7 +10,11 @@ export async function setupTestDatabase() {
   const connectionString = process.env.DATABASE_URL;
 
   if (!connectionString) {
-    throw new Error('DATABASE_URL environment variable is required for tests');
+    throw new Error(
+      'DATABASE_URL is required to run the test suite. The service tests execute ' +
+        'against a real Postgres "test" schema. Copy .env.example to .env and set ' +
+        'DATABASE_URL (a free Neon database works). See README → Testing.',
+    );
   }
 
   // Create connection

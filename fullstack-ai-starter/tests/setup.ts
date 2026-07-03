@@ -4,8 +4,14 @@ import { handlers } from './mocks/handlers';
 import '@testing-library/jest-dom';
 import { cleanTestDatabase, setupTestDatabase, teardownTestDatabase } from './utils/test-database';
 
-// Load environment variables from .env for tests (needed for DATABASE_URL)
-process.loadEnvFile?.('.env');
+// Load environment variables from .env for tests (needed for DATABASE_URL).
+// Optional: a fresh clone may not have a .env yet, and in CI the environment is
+// provided by the shell — a missing file must not crash the whole suite.
+try {
+  process.loadEnvFile?.('.env');
+} catch {
+  // No .env file present — fall back to the ambient environment.
+}
 
 // Setup MSW server for API mocking
 export const server = setupServer(...handlers);
